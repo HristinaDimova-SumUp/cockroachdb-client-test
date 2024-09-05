@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -48,6 +50,9 @@ func main() {
 	poolConfig.MinConns = 10
 	poolConfig.MaxConns = 10
 
+	var tr MyTracer
+	poolConfig.ConnConfig.Tracer = tr
+
 	db, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		print(err)
@@ -63,4 +68,53 @@ func main() {
 	}
 
 	println("created client")
+}
+
+type MyTracer struct{}
+
+func (t MyTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+
+func (t MyTracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {
+}
+
+func (t MyTracer) TraceConnectStart(ctx context.Context, data pgx.TraceConnectStartData) context.Context {
+
+	fmt.Println("connecting")
+
+	return ctx
+}
+
+func (t MyTracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndData) {
+	connectData, ok := ctx.Value("connect").(*traceConnectData)
+	if !ok {
+		connectData = &traceConnectData{}
+	}
+
+	traceData := &traceConnectEndData{
+		startTime:  connectData.startTime,
+		connConfig: connectData.connConfig,
+		conn:       data.Conn,
+		err:        data.Err,
+	}
+
+	if traceData.err == nil {
+		fmt.Println("connected")
+		return
+	}
+
+	fmt.Printf("Error while connecting: '%s'", traceData.err.Error())
+}
+
+type traceConnectData struct {
+	startTime  time.Time
+	connConfig *pgx.ConnConfig
+}
+
+type traceConnectEndData struct {
+	startTime  time.Time
+	connConfig *pgx.ConnConfig
+	conn       *pgx.Conn
+	err        error
 }
